@@ -338,7 +338,7 @@ model Prospect {
   postalCode          String?
   country             String?        @default("FR")
 
-  stage               ProspectStage  @default(PROSPECT)
+  stage               ProspectStage  @default(TO_CALLBACK)
   stageChangedAt      DateTime       @default(now())
 
   practiceAreaId      String?
@@ -392,12 +392,14 @@ model Prospect {
 }
 
 enum ProspectStage {
-  PROSPECT
+  NEW
+  TO_CALLBACK
   QUALIFIED
   APPOINTMENT
   CLIENT
   DOSSIER
   CLOSED
+  LOST
 }
 
 enum ProspectSource {

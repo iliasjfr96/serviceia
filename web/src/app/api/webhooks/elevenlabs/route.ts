@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { createCallFromWebhook, updateCallStatus } from "@/lib/dal/calls";
 import { createProspect, addNote } from "@/lib/dal/prospects";
+import { getOrCreateSystemList, addProspectToList } from "@/lib/dal/prospect-lists";
 import { enforceRateLimit, RATE_LIMITS } from "@/lib/rate-limit";
+import { SYSTEM_LISTS } from "@/lib/constants/pipeline";
 import crypto from "crypto";
 
 // Verify ElevenLabs webhook signature (HMAC-SHA256)
@@ -356,6 +358,53 @@ async function handlePostCall(data: Record<string, unknown>, _fullBody: Record<s
           `Resume IA de l'appel:\n${summary}`,
           "AI_SUMMARY"
         );
+      }
+
+      // ── AUTO-WORKFLOW: Add to "À rappeler" list ──────────────────────────────
+      try {
+        // Get or create the "À rappeler" system list
+        const toCallbackList = await getOrCreateSystemList(
+          existingCall.tenantId,
+          SYSTEM_LISTS.TO_CALLBACK
+        );
+
+        // Add prospect to the list
+        await addProspectToList(existingCall.tenantId, toCallbackList.id, prospectId);
+
+        // Update prospect stage to TO_CALLBACK
+        await prisma.prospect.update({
+          where: { id: prospectId },
+          data: {
+            stage: "TO_CALLBACK",
+            stageChangedAt: new Date(),
+          },
+        });
+
+        // Create a callback task in the agenda
+        const callbackDate = new Date();
+        callbackDate.setHours(callbackDate.getHours() + 1); // Callback within 1 hour
+
+        const prospectName = [firstName, lastName].filter(Boolean).join(" ") || phone || "Nouveau prospect";
+
+        await prisma.appointment.create({
+          data: {
+            tenantId: existingCall.tenantId,
+            prospectId,
+            title: `Rappeler: ${prospectName}`,
+            description: summary ? `Resume de l'appel IA:\n${summary}` : "Appel entrant via agent IA - A rappeler",
+            startTime: callbackDate,
+            endTime: new Date(callbackDate.getTime() + 15 * 60000), // 15 min slot
+            duration: 15,
+            status: "SCHEDULED",
+            bookedBy: "AI",
+            consultationType: "CALLBACK",
+          },
+        });
+
+        console.log("[ElevenLabs Webhook] Added prospect to callback list and created task");
+      } catch (workflowError) {
+        console.error("[ElevenLabs Webhook] Workflow error:", workflowError);
+        // Don't fail the webhook if workflow fails
       }
     }
   }

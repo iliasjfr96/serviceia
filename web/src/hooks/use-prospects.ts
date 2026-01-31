@@ -198,3 +198,46 @@ export function useAddNote() {
     },
   });
 }
+
+// ── Quick Actions (Callback workflow) ──────────────────────────────
+
+interface QuickActionData {
+  action: "CANCELLED" | "APPOINTMENT_CONFIRMED";
+  appointmentDate?: string;
+  appointmentTime?: string;
+  notes?: string;
+}
+
+export function useQuickAction() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async ({
+      prospectId,
+      data,
+    }: {
+      prospectId: string;
+      data: QuickActionData;
+    }) => {
+      const res = await fetch(`/api/v1/prospects/${prospectId}/quick-action`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.error || "Erreur lors de l'action");
+      }
+      return res.json();
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["prospects"] });
+      queryClient.invalidateQueries({
+        queryKey: ["prospect", variables.prospectId],
+      });
+      queryClient.invalidateQueries({ queryKey: ["prospect-stats"] });
+      queryClient.invalidateQueries({ queryKey: ["prospect-lists"] });
+      queryClient.invalidateQueries({ queryKey: ["appointments"] });
+    },
+  });
+}

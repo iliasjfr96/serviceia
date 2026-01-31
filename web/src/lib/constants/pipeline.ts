@@ -1,19 +1,23 @@
 export const STAGE_LABELS: Record<string, string> = {
-  PROSPECT: "Prospect",
+  NEW: "Nouveau",
+  TO_CALLBACK: "A rappeler",
   QUALIFIED: "Qualifie",
-  APPOINTMENT: "RDV",
+  APPOINTMENT: "RDV confirme",
   CLIENT: "Client",
   DOSSIER: "Dossier",
   CLOSED: "Cloture",
+  LOST: "Annule",
 };
 
 export const STAGE_COLORS: Record<string, string> = {
-  PROSPECT: "bg-blue-100 text-blue-800",
+  NEW: "bg-cyan-100 text-cyan-800",
+  TO_CALLBACK: "bg-orange-100 text-orange-800",
   QUALIFIED: "bg-yellow-100 text-yellow-800",
   APPOINTMENT: "bg-purple-100 text-purple-800",
   CLIENT: "bg-green-100 text-green-800",
   DOSSIER: "bg-emerald-100 text-emerald-800",
   CLOSED: "bg-gray-100 text-gray-800",
+  LOST: "bg-red-100 text-red-800",
 };
 
 export const URGENCY_LABELS: Record<string, string> = {
@@ -41,10 +45,19 @@ export const SOURCE_LABELS: Record<string, string> = {
 };
 
 export const STAGES_ORDER = [
-  "PROSPECT",
+  "NEW",
+  "TO_CALLBACK",
   "QUALIFIED",
   "APPOINTMENT",
   "CLIENT",
   "DOSSIER",
   "CLOSED",
+  "LOST",
 ] as const;
+
+// System list names (auto-created)
+export const SYSTEM_LISTS = {
+  TO_CALLBACK: "A rappeler",
+  APPOINTMENT_CONFIRMED: "RDV confirmes",
+  CANCELLED: "Annules",
+} as const;

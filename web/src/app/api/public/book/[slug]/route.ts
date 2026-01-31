@@ -284,7 +284,7 @@ export async function POST(
         phone,
         ...(practiceAreaRecord ? { practiceAreaId: practiceAreaRecord.id } : {}),
         source: "WEBSITE",
-        stage: "PROSPECT",
+        stage: "APPOINTMENT",
         consentGiven: true,
         consentDate: new Date(),
       },

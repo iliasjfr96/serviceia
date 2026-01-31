@@ -1,4 +1,82 @@
 import { prisma } from "@/lib/prisma";
+import { SYSTEM_LISTS } from "@/lib/constants/pipeline";
+
+// ── Get or Create System List ──────────────────────────────
+
+const SYSTEM_LIST_COLORS: Record<string, string> = {
+  [SYSTEM_LISTS.TO_CALLBACK]: "#f97316", // orange
+  [SYSTEM_LISTS.APPOINTMENT_CONFIRMED]: "#8b5cf6", // purple
+  [SYSTEM_LISTS.CANCELLED]: "#ef4444", // red
+};
+
+export async function getOrCreateSystemList(
+  tenantId: string,
+  listName: string
+) {
+  // Try to find existing list
+  let list = await prisma.prospectList.findFirst({
+    where: { tenantId, name: listName },
+  });
+
+  // Create if doesn't exist
+  if (!list) {
+    list = await prisma.prospectList.create({
+      data: {
+        tenantId,
+        name: listName,
+        description: `Liste systeme: ${listName}`,
+        color: SYSTEM_LIST_COLORS[listName] || "#6b7280",
+      },
+    });
+  }
+
+  return list;
+}
+
+// ── Add Single Prospect to List ──────────────────────────────
+
+export async function addProspectToList(
+  tenantId: string,
+  listId: string,
+  prospectId: string
+) {
+  // Verify list and prospect belong to tenant
+  const [list, prospect] = await Promise.all([
+    prisma.prospectList.findFirst({ where: { id: listId, tenantId } }),
+    prisma.prospect.findFirst({ where: { id: prospectId, tenantId } }),
+  ]);
+
+  if (!list || !prospect) return null;
+
+  // Check if already member
+  const existing = await prisma.prospectListMember.findUnique({
+    where: { listId_prospectId: { listId, prospectId } },
+  });
+
+  if (existing) return existing;
+
+  return prisma.prospectListMember.create({
+    data: { listId, prospectId },
+  });
+}
+
+// ── Remove Prospect from System List by Name ──────────────────────────────
+
+export async function removeProspectFromSystemList(
+  tenantId: string,
+  listName: string,
+  prospectId: string
+) {
+  const list = await prisma.prospectList.findFirst({
+    where: { tenantId, name: listName },
+  });
+
+  if (!list) return null;
+
+  return prisma.prospectListMember.deleteMany({
+    where: { listId: list.id, prospectId },
+  });
+}
 
 // ── List Prospect Lists ──────────────────────────────
 

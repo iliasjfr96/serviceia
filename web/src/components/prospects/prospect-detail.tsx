@@ -6,6 +6,7 @@ import {
   useProspect,
   useUpdateProspect,
   useUpdateProspectStage,
+  useQuickAction,
 } from "@/hooks/use-prospects";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -26,6 +27,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   STAGE_LABELS,
   STAGE_COLORS,
@@ -51,6 +60,8 @@ import {
   Save,
   PhoneCall,
   AlertTriangle,
+  X,
+  CheckCircle,
 } from "lucide-react";
 
 interface ProspectDetailProps {
@@ -62,8 +73,14 @@ export function ProspectDetail({ prospectId }: ProspectDetailProps) {
   const { data: prospect, isLoading, error } = useProspect(prospectId);
   const updateMutation = useUpdateProspect();
   const stageMutation = useUpdateProspectStage();
+  const quickActionMutation = useQuickAction();
   const [isEditing, setIsEditing] = useState(false);
   const [editForm, setEditForm] = useState<Record<string, string>>({});
+  const [showAppointmentDialog, setShowAppointmentDialog] = useState(false);
+  const [appointmentForm, setAppointmentForm] = useState({
+    date: "",
+    time: "09:00",
+  });
 
   if (isLoading) {
     return (
@@ -127,6 +144,50 @@ export function ProspectDetail({ prospectId }: ProspectDetailProps) {
     );
   }
 
+  function handleCancel() {
+    quickActionMutation.mutate(
+      {
+        prospectId,
+        data: { action: "CANCELLED" },
+      },
+      {
+        onSuccess: () => {
+          toast.success("Prospect marque comme annule");
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Erreur");
+        },
+      }
+    );
+  }
+
+  function handleConfirmAppointment() {
+    if (!appointmentForm.date) {
+      toast.error("Veuillez selectionner une date");
+      return;
+    }
+    quickActionMutation.mutate(
+      {
+        prospectId,
+        data: {
+          action: "APPOINTMENT_CONFIRMED",
+          appointmentDate: appointmentForm.date,
+          appointmentTime: appointmentForm.time,
+        },
+      },
+      {
+        onSuccess: () => {
+          toast.success("RDV confirme avec succes");
+          setShowAppointmentDialog(false);
+          setAppointmentForm({ date: "", time: "09:00" });
+        },
+        onError: (err) => {
+          toast.error(err instanceof Error ? err.message : "Erreur");
+        },
+      }
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -160,6 +221,34 @@ export function ProspectDetail({ prospectId }: ProspectDetailProps) {
           </div>
         </div>
         <div className="flex items-center gap-2">
+          {/* Quick Actions for TO_CALLBACK stage */}
+          {prospect.stage === "TO_CALLBACK" && (
+            <>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleCancel}
+                disabled={quickActionMutation.isPending}
+              >
+                {quickActionMutation.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <X className="mr-2 h-4 w-4" />
+                )}
+                Annule
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                className="bg-green-600 hover:bg-green-700"
+                onClick={() => setShowAppointmentDialog(true)}
+                disabled={quickActionMutation.isPending}
+              >
+                <CheckCircle className="mr-2 h-4 w-4" />
+                RDV confirme
+              </Button>
+            </>
+          )}
           <Select value={prospect.stage} onValueChange={handleStageChange}>
             <SelectTrigger className="w-[180px]">
               <SelectValue />
@@ -556,7 +645,7 @@ export function ProspectDetail({ prospectId }: ProspectDetailProps) {
                           </p>
                           <p className="text-xs text-muted-foreground">
                             Reserve par:{" "}
-                            {apt.bookedBy === "AI_AGENT" ? "Agent IA" : "Manuel"}
+                            {apt.bookedBy === "AI" ? "Agent IA" : apt.bookedBy === "ONLINE" ? "En ligne" : "Manuel"}
                           </p>
                         </div>
                       </div>
@@ -587,6 +676,63 @@ export function ProspectDetail({ prospectId }: ProspectDetailProps) {
           </Card>
         </TabsContent>
       </Tabs>
+
+      {/* Appointment Confirmation Dialog */}
+      <Dialog open={showAppointmentDialog} onOpenChange={setShowAppointmentDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Confirmer le rendez-vous</DialogTitle>
+            <DialogDescription>
+              Selectionnez la date et l&apos;heure du rendez-vous avec {fullName}.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-4">
+            <div className="space-y-2">
+              <Label htmlFor="apt-date">Date</Label>
+              <Input
+                id="apt-date"
+                type="date"
+                value={appointmentForm.date}
+                onChange={(e) =>
+                  setAppointmentForm((f) => ({ ...f, date: e.target.value }))
+                }
+                min={new Date().toISOString().split("T")[0]}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="apt-time">Heure</Label>
+              <Input
+                id="apt-time"
+                type="time"
+                value={appointmentForm.time}
+                onChange={(e) =>
+                  setAppointmentForm((f) => ({ ...f, time: e.target.value }))
+                }
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setShowAppointmentDialog(false)}
+            >
+              Annuler
+            </Button>
+            <Button
+              onClick={handleConfirmAppointment}
+              disabled={quickActionMutation.isPending || !appointmentForm.date}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {quickActionMutation.isPending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle className="mr-2 h-4 w-4" />
+              )}
+              Confirmer le RDV
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

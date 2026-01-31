@@ -186,12 +186,14 @@ export async function getDashboardChartData(tenantId: string) {
   });
 
   const pipelineData = [
-    "PROSPECT",
+    "NEW",
+    "TO_CALLBACK",
     "QUALIFIED",
     "APPOINTMENT",
     "CLIENT",
     "DOSSIER",
     "CLOSED",
+    "LOST",
   ].map((stage) => ({
     stage,
     count: pipeline.find((p) => p.stage === stage)?._count ?? 0,

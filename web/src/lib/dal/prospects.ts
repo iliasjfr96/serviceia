@@ -198,7 +198,7 @@ export async function createProspect(
     data: {
       tenantId,
       ...prospectData,
-      stage: "PROSPECT",
+      stage: "NEW",
       lastContactedAt: new Date(),
       ...(tags && tags.length > 0
         ? {
@@ -281,12 +281,14 @@ export async function deleteProspect(tenantId: string, prospectId: string) {
 
 export async function getProspectsByStage(tenantId: string) {
   const stages: ProspectStage[] = [
-    "PROSPECT",
+    "NEW",
+    "TO_CALLBACK",
     "QUALIFIED",
     "APPOINTMENT",
     "CLIENT",
     "DOSSIER",
     "CLOSED",
+    "LOST",
   ];
 
   const result: Record<string, Awaited<ReturnType<typeof prisma.prospect.findMany>>> = {};
