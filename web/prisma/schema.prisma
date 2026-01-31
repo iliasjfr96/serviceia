@@ -1,0 +1,946 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions", "fullTextSearchPostgres"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  extensions = [pgvector(map: "vector", schema: "public"), pgcrypto]
+}
+
+// ============================================================
+// AUTHENTICATION & MULTI-TENANCY
+// ============================================================
+
+model Tenant {
+  id                String     @id @default(cuid())
+  name              String
+  slug              String     @unique
+  email             String
+  phone             String?
+  address           String?
+  city              String?
+  postalCode        String?
+  country           String     @default("FR")
+  siret             String?
+  website           String?
+  logoUrl           String?
+  timezone          String     @default("Europe/Paris")
+  locale            String     @default("fr")
+
+  // Facturation
+  stripeCustomerId  String?    @unique
+  plan              TenantPlan @default(STARTER)
+  setupFee          Decimal?   @db.Decimal(10, 2)
+  monthlyFee        Decimal?   @db.Decimal(10, 2)
+  perCallFee        Decimal?   @db.Decimal(10, 4)
+
+  // Vapi
+  vapiAssistantId   String?
+  vapiPhoneNumberId String?
+  vapiPhoneNumber   String?
+
+  // RGPD
+  dataRetentionDays Int        @default(730)
+  rgpdContactEmail  String?
+  dpoName           String?
+
+  // Statut
+  isActive          Boolean    @default(true)
+  onboardedAt       DateTime?
+
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  // Relations
+  users                User[]
+  prospects            Prospect[]
+  calls                Call[]
+  appointments         Appointment[]
+  scripts              IntakeScript[]
+  knowledgeDocuments   KnowledgeDocument[]
+  agentConfig          AgentConfig?
+  automationRules      AutomationRule[]
+  campaigns            Campaign[]
+  emailTemplates       EmailTemplate[]
+  auditLogs            AuditLog[]
+  notifications        Notification[]
+  availabilitySlots    AvailabilitySlot[]
+  calendarIntegrations CalendarIntegration[]
+  practiceAreas        TenantPracticeArea[]
+  consentRecords       ConsentRecord[]
+  prospectLists        ProspectList[]
+
+  @@map("tenants")
+}
+
+enum TenantPlan {
+  STARTER
+  PROFESSIONAL
+  ENTERPRISE
+}
+
+model User {
+  id            String    @id @default(cuid())
+  tenantId      String?
+  email         String    @unique
+  emailVerified DateTime?
+  passwordHash  String?
+  name          String
+  image         String?
+  phone         String?
+  role          UserRole  @default(MEMBER)
+  isActive      Boolean   @default(true)
+  lastLoginAt   DateTime?
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  tenant        Tenant?   @relation(fields: [tenantId], references: [id])
+  accounts      Account[]
+  sessions      Session[]
+  notes         Note[]
+  auditLogs     AuditLog[]
+
+  @@index([tenantId])
+  @@map("users")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  MEMBER
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================================
+// MODULE 1: AGENT IA VOCAL
+// ============================================================
+
+model AgentConfig {
+  id                       String   @id @default(cuid())
+  tenantId                 String   @unique
+
+  agentName                String   @default("Sophie")
+  greetingMessage          String?  @db.Text
+  personality              String?  @db.Text
+  voiceId                  String?
+  voiceProvider            String   @default("elevenlabs")
+  elevenLabsAgentId        String?  // ID de l'agent conversationnel ElevenLabs
+
+  llmProvider              String   @default("anthropic")
+  llmModel                 String   @default("claude-sonnet-4-20250514")
+  temperature              Float    @default(0.3)
+  maxTokens                Int      @default(1000)
+
+  primaryLanguage          String   @default("fr")
+  supportedLanguages       String[] @default(["fr", "en", "ar", "es"])
+
+  maxCallDuration          Int      @default(600)
+  silenceTimeout           Int      @default(30)
+  enableRecording          Boolean  @default(true)
+  requireConsent           Boolean  @default(true)
+
+  emergencyTransferNumber  String?
+  enableEmergencyDetection Boolean  @default(true)
+
+  neverGiveLegalAdvice     Boolean  @default(true)
+  alwaysIdentifyAsAI       Boolean  @default(true)
+
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  tenant                   Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@map("agent_configs")
+}
+
+model IntakeScript {
+  id             String              @id @default(cuid())
+  tenantId       String
+  practiceAreaId String?
+  name           String
+  description    String?
+  steps          Json
+  isDefault      Boolean             @default(false)
+  isActive       Boolean             @default(true)
+  language       String              @default("fr")
+
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+
+  tenant         Tenant              @relation(fields: [tenantId], references: [id])
+  practiceArea   TenantPracticeArea? @relation(fields: [practiceAreaId], references: [id])
+
+  @@index([tenantId])
+  @@map("intake_scripts")
+}
+
+model Call {
+  id                String        @id @default(cuid())
+  tenantId          String
+  prospectId        String?
+
+  vapiCallId        String?       @unique
+  vapiAssistantId   String?
+
+  direction         CallDirection @default(INBOUND)
+  status            CallStatus    @default(RINGING)
+  callerNumber      String?
+  callerName        String?
+  destinationNumber String?
+  startedAt         DateTime?
+  endedAt           DateTime?
+  duration          Int?
+
+  recordingUrl      String?
+  transcriptRaw     String?       @db.Text
+  transcriptJson    Json?
+  summary           String?       @db.Text
+  summaryJson       Json?
+
+  detectedLanguage  String?
+  sentiment         String?
+  isEmergency       Boolean       @default(false)
+  emergencyType     String?
+  emergencyHandled  Boolean       @default(false)
+
+  extractedData     Json?
+
+  consentRecorded   Boolean       @default(false)
+  consentTimestamp   DateTime?
+  dataRetainUntil   DateTime?
+
+  costAmount        Decimal?      @db.Decimal(10, 4)
+  costCurrency      String        @default("EUR")
+
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  tenant            Tenant        @relation(fields: [tenantId], references: [id])
+  prospect          Prospect?     @relation(fields: [prospectId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([tenantId, status])
+  @@index([vapiCallId])
+  @@map("calls")
+}
+
+enum CallDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum CallStatus {
+  RINGING
+  IN_PROGRESS
+  COMPLETED
+  FAILED
+  MISSED
+  TRANSFERRED
+}
+
+model KnowledgeDocument {
+  id         String   @id @default(cuid())
+  tenantId   String
+
+  title      String
+  content    String   @db.Text
+  sourceType String
+  sourceUrl  String?
+  fileUrl    String?
+  mimeType   String?
+
+  isActive   Boolean  @default(true)
+  language   String   @default("fr")
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  tenant     Tenant   @relation(fields: [tenantId], references: [id])
+  chunks     KnowledgeChunk[]
+
+  @@index([tenantId])
+  @@map("knowledge_documents")
+}
+
+model KnowledgeChunk {
+  id         String   @id @default(cuid())
+  documentId String
+
+  content    String   @db.Text
+  chunkIndex Int
+  tokenCount Int?
+  metadata   Json?
+
+  createdAt  DateTime @default(now())
+
+  document   KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("knowledge_chunks")
+}
+
+// ============================================================
+// MODULE 2: CRM JURIDIQUE
+// ============================================================
+
+model Prospect {
+  id                  String         @id @default(cuid())
+  tenantId            String
+
+  firstName           String?
+  lastName            String?
+  email               String?
+  phone               String?
+  alternatePhone      String?
+  address             String?
+  city                String?
+  postalCode          String?
+  country             String?        @default("FR")
+
+  stage               ProspectStage  @default(PROSPECT)
+  stageChangedAt      DateTime       @default(now())
+
+  practiceAreaId      String?
+  source              ProspectSource @default(CALL_AI)
+  referralSource      String?
+
+  leadScore           Int            @default(0)
+  urgencyLevel        UrgencyLevel   @default(NORMAL)
+  estimatedValue      Decimal?       @db.Decimal(10, 2)
+
+  caseDescription     String?        @db.Text
+  opposingParty       String?
+  courtJurisdiction   String?
+  deadlineDate        DateTime?
+
+  isActive            Boolean        @default(true)
+  convertedToClientAt DateTime?
+  lostAt              DateTime?
+  lostReason          String?
+
+  consentGiven        Boolean        @default(false)
+  consentDate         DateTime?
+  consentMethod       String?
+  dataRetainUntil     DateTime?
+
+  lastContactedAt     DateTime?
+  nextFollowUpAt      DateTime?
+  totalInteractions   Int            @default(0)
+
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  tenant              Tenant              @relation(fields: [tenantId], references: [id])
+  practiceArea        TenantPracticeArea? @relation(fields: [practiceAreaId], references: [id])
+  calls               Call[]
+  appointments        Appointment[]
+  notes               Note[]
+  documents           Document[]
+  tags                ProspectTag[]
+  automationLogs      AutomationLog[]
+  listMemberships     ProspectListMember[]
+  campaignRecipients  CampaignRecipient[]
+
+  @@index([tenantId, stage])
+  @@index([tenantId, createdAt])
+  @@index([tenantId, leadScore])
+  @@index([tenantId, nextFollowUpAt])
+  @@index([email])
+  @@index([phone])
+  @@map("prospects")
+}
+
+enum ProspectStage {
+  PROSPECT
+  QUALIFIED
+  APPOINTMENT
+  CLIENT
+  DOSSIER
+  CLOSED
+}
+
+enum ProspectSource {
+  CALL_AI
+  CALL_MANUAL
+  WEBSITE
+  REFERRAL
+  WALK_IN
+  EMAIL
+  OTHER
+}
+
+enum UrgencyLevel {
+  LOW
+  NORMAL
+  HIGH
+  CRITICAL
+}
+
+model TenantPracticeArea {
+  id          String   @id @default(cuid())
+  tenantId    String
+  code        String
+  name        String
+  description String?
+  color       String?
+  isActive    Boolean  @default(true)
+  sortOrder   Int      @default(0)
+
+  tenant      Tenant         @relation(fields: [tenantId], references: [id])
+  prospects   Prospect[]
+  scripts     IntakeScript[]
+
+  @@unique([tenantId, code])
+  @@map("tenant_practice_areas")
+}
+
+model Note {
+  id         String   @id @default(cuid())
+  prospectId String
+  authorId   String?
+
+  content    String   @db.Text
+  type       NoteType @default(MANUAL)
+  isPinned   Boolean  @default(false)
+
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+  author     User?    @relation(fields: [authorId], references: [id])
+
+  @@index([prospectId, createdAt])
+  @@map("notes")
+}
+
+enum NoteType {
+  MANUAL
+  AI_SUMMARY
+  SYSTEM
+  FOLLOW_UP
+}
+
+model Document {
+  id          String   @id @default(cuid())
+  prospectId  String
+
+  name        String
+  description String?
+  fileUrl     String
+  mimeType    String
+  sizeBytes   Int
+  category    String?
+
+  uploadedAt  DateTime @default(now())
+
+  prospect    Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@index([prospectId])
+  @@map("documents")
+}
+
+model ProspectTag {
+  id         String   @id @default(cuid())
+  prospectId String
+  tag        String
+
+  prospect   Prospect @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@unique([prospectId, tag])
+  @@index([tag])
+  @@map("prospect_tags")
+}
+
+// ============================================================
+// MODULE 3: AGENDA & RDV + RELANCES
+// ============================================================
+
+model Appointment {
+  id                String            @id @default(cuid())
+  tenantId          String
+  prospectId        String?
+
+  title             String
+  description       String?
+  startTime         DateTime
+  endTime           DateTime
+  duration          Int
+  consultationType  String?
+
+  location          String?
+  isVirtual         Boolean           @default(false)
+  meetingUrl        String?
+
+  status            AppointmentStatus @default(SCHEDULED)
+
+  googleEventId     String?
+  outlookEventId    String?
+
+  bookedBy          BookedBy          @default(AI)
+  bookedAt          DateTime          @default(now())
+
+  depositRequired   Boolean           @default(false)
+  depositAmount     Decimal?          @db.Decimal(10, 2)
+  depositPaid       Boolean           @default(false)
+  stripePaymentId   String?
+
+  reminderJ1Sent    Boolean           @default(false)
+  reminderH2Sent    Boolean           @default(false)
+  reminderSmsJ1Sent Boolean           @default(false)
+
+  noShowCount       Int               @default(0)
+  lastNoShowAt      DateTime?
+
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+
+  tenant            Tenant            @relation(fields: [tenantId], references: [id])
+  prospect          Prospect?         @relation(fields: [prospectId], references: [id])
+
+  @@index([tenantId, startTime])
+  @@index([tenantId, status])
+  @@index([googleEventId])
+  @@index([outlookEventId])
+  @@map("appointments")
+}
+
+enum AppointmentStatus {
+  SCHEDULED
+  CONFIRMED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+  RESCHEDULED
+}
+
+enum BookedBy {
+  AI
+  MANUAL
+  ONLINE
+}
+
+model AvailabilitySlot {
+  id               String    @id @default(cuid())
+  tenantId         String
+
+  dayOfWeek        Int
+  startTime        String
+  endTime          String
+
+  consultationType String?
+  slotDuration     Int       @default(30)
+  bufferTime       Int       @default(15)
+  maxBookings      Int       @default(1)
+
+  isActive         Boolean   @default(true)
+
+  specificDate     DateTime?
+  isBlocked        Boolean   @default(false)
+
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant           Tenant    @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, dayOfWeek])
+  @@map("availability_slots")
+}
+
+model CalendarIntegration {
+  id                String           @id @default(cuid())
+  tenantId          String
+
+  provider          CalendarProvider
+  accountEmail      String
+  accessToken       String           @db.Text
+  refreshToken      String?          @db.Text
+  tokenExpiresAt    DateTime?
+  calendarId        String?
+
+  syncEnabled       Boolean          @default(true)
+  lastSyncAt        DateTime?
+  syncErrors        Int              @default(0)
+
+  webhookChannelId  String?
+  webhookExpiration DateTime?
+
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  tenant            Tenant           @relation(fields: [tenantId], references: [id])
+
+  @@unique([tenantId, provider])
+  @@map("calendar_integrations")
+}
+
+enum CalendarProvider {
+  GOOGLE
+  OUTLOOK
+}
+
+// ============================================================
+// AUTOMATISATIONS
+// ============================================================
+
+model AutomationRule {
+  id            String           @id @default(cuid())
+  tenantId      String
+
+  name          String
+  description   String?
+  type          AutomationType
+
+  triggerConfig Json
+  actionType    AutomationAction
+  actionConfig  Json
+
+  isActive      Boolean          @default(true)
+
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  tenant        Tenant           @relation(fields: [tenantId], references: [id])
+  logs          AutomationLog[]
+
+  @@index([tenantId, type])
+  @@map("automation_rules")
+}
+
+enum AutomationType {
+  FOLLOW_UP
+  REMINDER
+  REACTIVATION
+  NOTIFICATION
+  NO_SHOW
+}
+
+enum AutomationAction {
+  SEND_EMAIL
+  SEND_SMS
+  INTERNAL_NOTIFICATION
+  CHANGE_STAGE
+  CREATE_TASK
+}
+
+model AutomationLog {
+  id            String              @id @default(cuid())
+  ruleId        String
+  prospectId    String?
+
+  action        String
+  status        AutomationLogStatus @default(PENDING)
+  scheduledFor  DateTime
+  executedAt    DateTime?
+
+  resultMessage String?
+  errorMessage  String?
+  metadata      Json?
+
+  createdAt     DateTime            @default(now())
+
+  rule          AutomationRule      @relation(fields: [ruleId], references: [id])
+  prospect      Prospect?           @relation(fields: [prospectId], references: [id])
+
+  @@index([ruleId, status])
+  @@index([scheduledFor])
+  @@map("automation_logs")
+}
+
+enum AutomationLogStatus {
+  PENDING
+  EXECUTING
+  SUCCESS
+  FAILED
+  SKIPPED
+}
+
+model Campaign {
+  id             String         @id @default(cuid())
+  tenantId       String
+
+  name           String
+  description    String?
+  type           CampaignType
+
+  // Ciblage
+  prospectListId String?
+  targetCriteria Json
+
+  // Contenu
+  channel        CampaignChannel @default(EMAIL)
+  emailSubject   String?
+  emailBody      String?        @db.Text
+  smsMessage     String?
+
+  // Planification
+  startDate      DateTime?
+  endDate        DateTime?
+
+  // Metriques
+  totalTargeted  Int            @default(0)
+  totalSent      Int            @default(0)
+  totalOpened    Int            @default(0)
+  totalResponded Int            @default(0)
+
+  status         CampaignStatus @default(DRAFT)
+
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  tenant         Tenant         @relation(fields: [tenantId], references: [id])
+  prospectList   ProspectList?  @relation(fields: [prospectListId], references: [id])
+  recipients     CampaignRecipient[]
+
+  @@index([tenantId, status])
+  @@map("campaigns")
+}
+
+enum CampaignChannel {
+  EMAIL
+  SMS
+  EMAIL_SMS
+}
+
+enum CampaignType {
+  REACTIVATION
+  FOLLOW_UP
+  ANNOUNCEMENT
+}
+
+enum CampaignStatus {
+  DRAFT
+  SCHEDULED
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+// ── Templates Email ──────────────────────────────
+
+model EmailTemplate {
+  id          String                @id @default(cuid())
+  tenantId    String
+
+  name        String
+  description String?
+  category    EmailTemplateCategory @default(GENERAL)
+
+  subject     String
+  body        String                @db.Text
+
+  isDefault   Boolean               @default(false)
+
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+
+  tenant      Tenant                @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, category])
+  @@map("email_templates")
+}
+
+enum EmailTemplateCategory {
+  GENERAL
+  FOLLOW_UP
+  REMINDER
+  CONFIRMATION
+  REACTIVATION
+}
+
+// ── Listes de Prospects ──────────────────────────────
+
+model ProspectList {
+  id          String               @id @default(cuid())
+  tenantId    String
+
+  name        String
+  description String?
+  color       String?
+
+  createdAt   DateTime             @default(now())
+  updatedAt   DateTime             @updatedAt
+
+  tenant      Tenant               @relation(fields: [tenantId], references: [id])
+  members     ProspectListMember[]
+  campaigns   Campaign[]
+
+  @@index([tenantId])
+  @@map("prospect_lists")
+}
+
+model ProspectListMember {
+  id         String       @id @default(cuid())
+  listId     String
+  prospectId String
+
+  addedAt    DateTime     @default(now())
+
+  list       ProspectList @relation(fields: [listId], references: [id], onDelete: Cascade)
+  prospect   Prospect     @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@unique([listId, prospectId])
+  @@index([prospectId])
+  @@map("prospect_list_members")
+}
+
+// ── Destinataires de Campagne ──────────────────────────────
+
+model CampaignRecipient {
+  id           String                   @id @default(cuid())
+  campaignId   String
+  prospectId   String
+
+  channel      CampaignChannel          @default(EMAIL)
+  status       CampaignRecipientStatus  @default(PENDING)
+
+  sentAt       DateTime?
+  openedAt     DateTime?
+  respondedAt  DateTime?
+  failedAt     DateTime?
+  errorMessage String?
+
+  createdAt    DateTime                 @default(now())
+
+  campaign     Campaign                 @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  prospect     Prospect                 @relation(fields: [prospectId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, prospectId, channel])
+  @@index([campaignId, status])
+  @@index([prospectId])
+  @@map("campaign_recipients")
+}
+
+enum CampaignRecipientStatus {
+  PENDING
+  SENT
+  OPENED
+  RESPONDED
+  FAILED
+}
+
+// ============================================================
+// TRANSVERSAL : NOTIFICATIONS, AUDIT, RGPD
+// ============================================================
+
+model Notification {
+  id        String           @id @default(cuid())
+  tenantId  String
+  userId    String?
+
+  type      NotificationType
+  title     String
+  message   String
+  data      Json?
+
+  isRead    Boolean          @default(false)
+  readAt    DateTime?
+
+  createdAt DateTime         @default(now())
+
+  tenant    Tenant           @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+enum NotificationType {
+  NEW_LEAD
+  EMERGENCY
+  MISSED_FOLLOW_UP
+  APPOINTMENT_BOOKED
+  APPOINTMENT_CANCELLED
+  NO_SHOW
+  SYSTEM
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  tenantId   String?
+  userId     String?
+
+  action     String
+  entityType String
+  entityId   String?
+
+  oldValues  Json?
+  newValues  Json?
+
+  ipAddress  String?
+  userAgent  String?
+
+  createdAt  DateTime @default(now())
+
+  tenant     Tenant?  @relation(fields: [tenantId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
+
+  @@index([tenantId, createdAt])
+  @@index([entityType, entityId])
+  @@index([action])
+  @@map("audit_logs")
+}
+
+model ConsentRecord {
+  id           String   @id @default(cuid())
+  tenantId     String
+  prospectId   String?
+
+  consentType  String
+  granted      Boolean
+  method       String
+  ipAddress    String?
+
+  grantedAt    DateTime @default(now())
+  revokedAt    DateTime?
+
+  proofType    String?
+  proofData    Json?
+
+  tenant       Tenant   @relation(fields: [tenantId], references: [id])
+
+  @@index([tenantId, prospectId])
+  @@index([consentType])
+  @@map("consent_records")
+}

@@ -1,0 +1,146 @@
+version: "3.9"
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ServiceIA - Docker Compose Production
+# ══════════════════════════════════════════════════════════════════════════════
+# Usage: docker compose -f deploy/docker-compose.yml up -d
+# ══════════════════════════════════════════════════════════════════════════════
+
+services:
+  # ────────────────────────────────────────────────────────────────────────────
+  # PostgreSQL Database
+  # ────────────────────────────────────────────────────────────────────────────
+  db:
+    image: pgvector/pgvector:pg16
+    container_name: serviceia-db
+    restart: always
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: serviceia
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: serviceia
+    volumes:
+      - serviceia_db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U serviceia -d serviceia"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - serviceia-network
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Redis Cache
+  # ────────────────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: serviceia-redis
+    restart: always
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - serviceia_redis:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - serviceia-network
+
+  # ────────────────────────────────────────────────────────────────────────────
+  # Web Application (Next.js)
+  # ────────────────────────────────────────────────────────────────────────────
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
+    container_name: serviceia-web
+    restart: always
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "${PORT:-3000}:3000"
+    environment:
+      # Database
+      DATABASE_URL: postgresql://serviceia:${POSTGRES_PASSWORD}@db:5432/serviceia
+
+      # Redis
+      REDIS_URL: redis://redis:6379
+
+      # Auth
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      AUTH_TRUST_HOST: "true"
+
+      # Environment
+      NODE_ENV: production
+
+      # AI
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # Voice Agent
+      ELEVENLABS_API_KEY: ${ELEVENLABS_API_KEY:-}
+      ELEVENLABS_WEBHOOK_SECRET: ${ELEVENLABS_WEBHOOK_SECRET:-}
+      ELEVENLABS_AGENT_ID: ${ELEVENLABS_AGENT_ID:-}
+
+      # Telephony
+      TWILIO_ACCOUNT_SID: ${TWILIO_ACCOUNT_SID:-}
+      TWILIO_AUTH_TOKEN: ${TWILIO_AUTH_TOKEN:-}
+      TWILIO_PHONE_NUMBER: ${TWILIO_PHONE_NUMBER:-}
+
+      # Email
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@serviceia.fr}
+
+      # Calendar
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+
+      # Payments
+      STRIPE_SECRET_KEY: ${STRIPE_SECRET_KEY:-}
+      STRIPE_WEBHOOK_SECRET: ${STRIPE_WEBHOOK_SECRET:-}
+
+      # Storage
+      S3_ENDPOINT: ${S3_ENDPOINT:-}
+      S3_ACCESS_KEY: ${S3_ACCESS_KEY:-}
+      S3_SECRET_KEY: ${S3_SECRET_KEY:-}
+      S3_BUCKET: ${S3_BUCKET:-serviceia-files}
+      S3_REGION: ${S3_REGION:-fr-par}
+
+      # Initial Setup (used by entrypoint)
+      SETUP_CABINET_NAME: ${CABINET_NAME:-}
+      SETUP_CABINET_SLUG: ${CABINET_SLUG:-}
+      SETUP_CABINET_EMAIL: ${CABINET_EMAIL:-}
+      SETUP_CABINET_PHONE: ${CABINET_PHONE:-}
+      SETUP_ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+      SETUP_ADMIN_NAME: ${ADMIN_NAME:-}
+      SETUP_ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    networks:
+      - serviceia-network
+
+# ────────────────────────────────────────────────────────────────────────────
+# Volumes
+# ────────────────────────────────────────────────────────────────────────────
+volumes:
+  serviceia_db:
+    name: serviceia_db
+  serviceia_redis:
+    name: serviceia_redis
+
+# ────────────────────────────────────────────────────────────────────────────
+# Networks
+# ────────────────────────────────────────────────────────────────────────────
+networks:
+  serviceia-network:
+    name: serviceia-network
+    driver: bridge
