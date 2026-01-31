@@ -1052,7 +1052,7 @@ function CreateListDialog() {
 
 function ProspectListDetail({
   listId,
-  onClose,
+  onClose: _onClose,
 }: {
   listId: string;
   onClose: () => void;

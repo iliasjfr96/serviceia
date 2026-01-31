@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Mic, X, Phone } from "lucide-react";
+import { Mic } from "lucide-react";
 
 const AGENT_URL = "https://elevenlabs.io/app/talk-to?agent_id=agent_5201kg5bj2e0fzwrwjv38za70mbc";
 

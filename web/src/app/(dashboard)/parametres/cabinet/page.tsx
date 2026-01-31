@@ -38,6 +38,7 @@ export default function CabinetSettingsPage() {
 
   useEffect(() => {
     if (cabinet) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         name: cabinet.name || "",
         email: cabinet.email || "",

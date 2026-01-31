@@ -83,6 +83,7 @@ export function AppointmentDialog({
     if (appointment) {
       const start = new Date(appointment.startTime);
       const end = new Date(appointment.endTime);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         title: appointment.title,
         description: appointment.description || "",
@@ -98,6 +99,7 @@ export function AppointmentDialog({
         bookedBy: appointment.bookedBy,
       });
     } else {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm({
         title: "",
         description: "",
@@ -127,6 +129,7 @@ export function AppointmentDialog({
     const [eh, em] = form.endHour.split(":").map(Number);
     const dur = (eh * 60 + em) - (sh * 60 + sm);
     if (dur > 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setForm((f) => ({ ...f, duration: dur }));
     }
   }, [form.startHour, form.endHour]);

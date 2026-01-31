@@ -116,7 +116,9 @@ export function useCallStream(options: UseCallStreamOptions = {}) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
       }
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setIsConnected(false);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setCalls([]);
       return;
     }

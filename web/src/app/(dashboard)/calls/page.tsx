@@ -186,6 +186,7 @@ function ActiveCallCard({ call }: { call: Call }) {
   useEffect(() => {
     if (call.transcriptRaw !== prevTranscriptRef.current) {
       prevTranscriptRef.current = call.transcriptRaw ?? null;
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setShowTyping(true);
       const timeout = setTimeout(() => setShowTyping(false), 1500);
       return () => clearTimeout(timeout);
@@ -298,15 +299,9 @@ function TestCallDialog({
   onOpenChange: (open: boolean) => void;
 }) {
   const { data: agentConfig } = useAgentConfig();
-  const [testUrl, setTestUrl] = useState("");
-
-  useEffect(() => {
-    if (agentConfig?.voiceId) {
-      setTestUrl(
-        `https://elevenlabs.io/app/conversational-ai/${agentConfig.voiceId}/call`
-      );
-    }
-  }, [agentConfig?.voiceId]);
+  const testUrl = agentConfig?.voiceId
+    ? `https://elevenlabs.io/app/conversational-ai/${agentConfig.voiceId}/call`
+    : "";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

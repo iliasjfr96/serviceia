@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { prisma } from "@/lib/prisma";
-import { addDays, startOfDay, endOfDay, format, parse, isAfter, isBefore } from "date-fns";
+import { addDays, startOfDay, format, parse, isBefore } from "date-fns";
 import { fr } from "date-fns/locale";
 
 // GET - Get available slots for a tenant

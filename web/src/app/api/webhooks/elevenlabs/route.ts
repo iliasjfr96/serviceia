@@ -152,7 +152,7 @@ async function handleInitiation(body: Record<string, unknown>) {
   return NextResponse.json({ received: true });
 }
 
-async function handlePostCall(data: Record<string, unknown>, fullBody: Record<string, unknown>) {
+async function handlePostCall(data: Record<string, unknown>, _fullBody: Record<string, unknown>) {
   const conversationId = data.conversation_id as string;
   if (!conversationId) {
     console.log("[ElevenLabs Webhook] No conversation_id in payload");

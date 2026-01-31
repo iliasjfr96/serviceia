@@ -227,7 +227,7 @@ export async function updateProspect(
   });
   if (!existing) return null;
 
-  const { tags, ...updateData } = data;
+  const { tags: _tags, ...updateData } = data;
 
   const prospect = await prisma.prospect.update({
     where: { id: prospectId },

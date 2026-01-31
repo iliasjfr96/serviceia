@@ -30,7 +30,7 @@ export async function requireAdmin() {
 }
 
 export async function getTenantIdFromRequest(
-  request: Request
+  _request: Request
 ): Promise<{ userId: string; tenantId: string | null; role: string } | null> {
   const session = await auth();
   if (!session?.user?.id) return null;

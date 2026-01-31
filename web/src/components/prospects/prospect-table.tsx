@@ -32,7 +32,6 @@ import {
 import {
   STAGE_LABELS,
   URGENCY_LABELS,
-  SOURCE_LABELS,
 } from "@/lib/constants/pipeline";
 import {
   Search,
