@@ -256,7 +256,7 @@ async function handlePostCall(data: Record<string, unknown>, _fullBody: Record<s
     extractedData: dataCollection as unknown,
   });
 
-  // Extract caller info from data_collection OR parse from transcript
+  // Extract caller info from data_collection OR summary OR transcript
   let phone =
     (dataCollection?.phone as string) ||
     (dataCollection?.telephone as string) ||
@@ -269,7 +269,57 @@ async function handlePostCall(data: Record<string, unknown>, _fullBody: Record<s
     (dataCollection?.nom as string);
   let email = dataCollection?.email as string;
 
-  // If no data from data_collection, try to parse from transcript (CLIENT lines only)
+  // PRIORITY 1: Try to extract from AI summary (most reliable)
+  if (summary && (!firstName || !lastName)) {
+    console.log("[ElevenLabs Webhook] Parsing summary for contact info:", summary.substring(0, 200));
+
+    // Common patterns in French summaries:
+    // "M./Mme [Name] [LastName] a appele..."
+    // "Le client [Name] [LastName] souhaite..."
+    // "Appel de [Name] [LastName] concernant..."
+    // "[Name] [LastName] contacte le cabinet..."
+    const summaryNamePatterns = [
+      /(?:M\.|Mme|Monsieur|Madame|Le client|La cliente|Appel de|appelant[e]?)\s+([A-ZÀ-Üa-zà-ü]+)\s+([A-ZÀ-Üa-zà-ü]+)/i,
+      /([A-ZÀ-Ü][a-zà-ü]+)\s+([A-ZÀ-Ü][A-ZÀ-Üa-zà-ü]+)\s+(?:a appele|appelle|contacte|souhaite|cherche|demande)/i,
+      /(?:client[e]?|prospect)\s*:?\s*([A-ZÀ-Üa-zà-ü]+)\s+([A-ZÀ-Üa-zà-ü]+)/i,
+    ];
+
+    for (const pattern of summaryNamePatterns) {
+      const match = summary.match(pattern);
+      if (match) {
+        // Check if we got valid name parts (not common words)
+        const commonWords = ["le", "la", "un", "une", "de", "du", "des", "pour", "avec", "sur", "appel", "client", "cabinet"];
+        const potentialFirst = match[1].toLowerCase();
+        const potentialLast = match[2].toLowerCase();
+
+        if (!commonWords.includes(potentialFirst) && !commonWords.includes(potentialLast)) {
+          firstName = match[1];
+          lastName = match[2];
+          console.log("[ElevenLabs Webhook] Extracted from summary - name:", firstName, lastName);
+          break;
+        }
+      }
+    }
+
+    // Also try to extract phone from summary
+    if (!phone) {
+      const phoneMatch = summary.match(/(?:0[1-9]|\+33|\+32)[\s.-]?(?:\d[\s.-]?){8,9}/);
+      if (phoneMatch) {
+        phone = phoneMatch[0].replace(/[\s.-]/g, '');
+        console.log("[ElevenLabs Webhook] Extracted phone from summary:", phone);
+      }
+    }
+
+    // Extract email from summary
+    if (!email) {
+      const emailMatch = summary.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+      if (emailMatch) {
+        email = emailMatch[0];
+      }
+    }
+  }
+
+  // PRIORITY 2: If still no data, try to parse from transcript (CLIENT lines only)
   if (!phone && !firstName && !lastName && !email && transcriptText) {
     // Extract only client lines for parsing (avoid extracting agent's words)
     const clientLines = transcriptText
