@@ -257,155 +257,158 @@ async function handlePostCall(data: Record<string, unknown>, _fullBody: Record<s
   });
 
   // Extract caller info from data_collection OR parse from transcript
-  if (!existingCall.prospectId) {
-    let phone =
-      (dataCollection?.phone as string) ||
-      (dataCollection?.telephone as string) ||
-      (dataCollection?.numero as string);
-    let firstName =
-      (dataCollection?.first_name as string) ||
-      (dataCollection?.prenom as string);
-    let lastName =
-      (dataCollection?.last_name as string) ||
-      (dataCollection?.nom as string);
-    let email = dataCollection?.email as string;
+  let phone =
+    (dataCollection?.phone as string) ||
+    (dataCollection?.telephone as string) ||
+    (dataCollection?.numero as string);
+  let firstName =
+    (dataCollection?.first_name as string) ||
+    (dataCollection?.prenom as string);
+  let lastName =
+    (dataCollection?.last_name as string) ||
+    (dataCollection?.nom as string);
+  let email = dataCollection?.email as string;
 
-    // If no data from data_collection, try to parse from transcript (CLIENT lines only)
-    if (!phone && !firstName && !lastName && !email && transcriptText) {
-      // Extract only client lines for parsing (avoid extracting agent's words)
-      const clientLines = transcriptText
-        .split('\n')
-        .filter(line => line.startsWith('Client:'))
-        .map(line => line.replace('Client:', '').trim())
-        .join(' ');
+  // If no data from data_collection, try to parse from transcript (CLIENT lines only)
+  if (!phone && !firstName && !lastName && !email && transcriptText) {
+    // Extract only client lines for parsing (avoid extracting agent's words)
+    const clientLines = transcriptText
+      .split('\n')
+      .filter(line => line.startsWith('Client:'))
+      .map(line => line.replace('Client:', '').trim())
+      .join(' ');
 
-      console.log("[ElevenLabs Webhook] Client speech:", clientLines.substring(0, 200));
+    console.log("[ElevenLabs Webhook] Client speech:", clientLines.substring(0, 200));
 
-      // Extract phone number (French/Belgian formats: 0X XX XX XX XX)
-      const phoneMatch = clientLines.match(/(?:0[1-9]|\+33|\+32)[\s.-]?(?:\d[\s.-]?){8,9}/);
-      if (phoneMatch) {
-        phone = phoneMatch[0].replace(/[\s.-]/g, '');
-      }
-
-      // Extract email (standard format)
-      const emailMatch = clientLines.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-      if (emailMatch) {
-        email = emailMatch[0];
-      }
-
-      // Try to extract name from common patterns in French
-      // Pattern: "c'est [Name] [LastName]" or "je m'appelle [Name]" etc.
-      const namePatterns = [
-        /(?:c'est|je suis|je m'appelle|mon nom est|mon nom c'est)\s+([A-ZÀ-Üa-zà-ü]+(?:\s+[A-ZÀ-Üa-zà-ü]+)?)/i,
-        /(?:au nom de|pour)\s+([A-ZÀ-Üa-zà-ü]+(?:\s+[A-ZÀ-Üa-zà-ü]+)?)/i,
-      ];
-      for (const pattern of namePatterns) {
-        const nameMatch = clientLines.match(pattern);
-        if (nameMatch) {
-          const nameParts = nameMatch[1].trim().split(/\s+/);
-          if (nameParts.length >= 2) {
-            firstName = nameParts[0];
-            lastName = nameParts.slice(1).join(' ');
-          } else {
-            firstName = nameParts[0];
-          }
-          break;
-        }
-      }
-
-      console.log("[ElevenLabs Webhook] Parsed from transcript - phone:", phone, "email:", email, "name:", firstName, lastName);
+    // Extract phone number (French/Belgian formats: 0X XX XX XX XX)
+    const phoneMatch = clientLines.match(/(?:0[1-9]|\+33|\+32)[\s.-]?(?:\d[\s.-]?){8,9}/);
+    if (phoneMatch) {
+      phone = phoneMatch[0].replace(/[\s.-]/g, '');
     }
 
-    if (phone || firstName || lastName || email) {
-      // Check if prospect exists by phone
-      let prospectId: string | undefined;
+    // Extract email (standard format)
+    const emailMatch = clientLines.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    if (emailMatch) {
+      email = emailMatch[0];
+    }
 
-      if (phone) {
-        const existing = await prisma.prospect.findFirst({
-          where: {
-            tenantId: existingCall.tenantId,
-            isActive: true,
-            OR: [{ phone }, { alternatePhone: phone }],
-          },
-          select: { id: true },
-        });
-        if (existing) prospectId = existing.id;
+    // Try to extract name from common patterns in French
+    // Pattern: "c'est [Name] [LastName]" or "je m'appelle [Name]" etc.
+    const namePatterns = [
+      /(?:c'est|je suis|je m'appelle|mon nom est|mon nom c'est)\s+([A-ZÀ-Üa-zà-ü]+(?:\s+[A-ZÀ-Üa-zà-ü]+)?)/i,
+      /(?:au nom de|pour)\s+([A-ZÀ-Üa-zà-ü]+(?:\s+[A-ZÀ-Üa-zà-ü]+)?)/i,
+    ];
+    for (const pattern of namePatterns) {
+      const nameMatch = clientLines.match(pattern);
+      if (nameMatch) {
+        const nameParts = nameMatch[1].trim().split(/\s+/);
+        if (nameParts.length >= 2) {
+          firstName = nameParts[0];
+          lastName = nameParts.slice(1).join(' ');
+        } else {
+          firstName = nameParts[0];
+        }
+        break;
       }
+    }
 
-      if (!prospectId) {
-        const newProspect = await createProspect(existingCall.tenantId, {
-          phone: phone || undefined,
-          firstName: firstName || undefined,
-          lastName: lastName || undefined,
-          email: email || undefined,
-          source: "CALL_AI",
-        });
-        prospectId = newProspect.id;
-      }
+    console.log("[ElevenLabs Webhook] Parsed from transcript - phone:", phone, "email:", email, "name:", firstName, lastName);
+  }
 
-      // Link call to prospect
-      await prisma.call.update({
-        where: { id: existingCall.id },
-        data: { prospectId },
+  // Determine prospect ID - use existing or create new
+  let prospectId = existingCall.prospectId;
+
+  if (!prospectId) {
+    // Check if prospect exists by phone
+    if (phone) {
+      const existing = await prisma.prospect.findFirst({
+        where: {
+          tenantId: existingCall.tenantId,
+          isActive: true,
+          OR: [{ phone }, { alternatePhone: phone }],
+        },
+        select: { id: true },
+      });
+      if (existing) prospectId = existing.id;
+    }
+
+    // Create prospect if not found (even without contact info - anonymous)
+    if (!prospectId) {
+      const newProspect = await createProspect(existingCall.tenantId, {
+        phone: phone || undefined,
+        firstName: firstName || "Appel",
+        lastName: lastName || new Date().toLocaleDateString("fr-FR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" }).replace(",", " -"),
+        email: email || undefined,
+        source: "CALL_AI",
+      });
+      prospectId = newProspect.id;
+      console.log("[ElevenLabs Webhook] Created new prospect:", prospectId);
+    }
+
+    // Link call to prospect
+    await prisma.call.update({
+      where: { id: existingCall.id },
+      data: { prospectId },
+    });
+  }
+
+  // Add AI summary as note
+  if (summary && prospectId) {
+    await addNote(
+      existingCall.tenantId,
+      prospectId,
+      null,
+      `Resume IA de l'appel:\n${summary}`,
+      "AI_SUMMARY"
+    );
+  }
+
+  // ── AUTO-WORKFLOW: Add to "À rappeler" list ──────────────────────────────
+  if (prospectId) {
+    try {
+      // Get or create the "À rappeler" system list
+      const toCallbackList = await getOrCreateSystemList(
+        existingCall.tenantId,
+        SYSTEM_LISTS.TO_CALLBACK
+      );
+
+      // Add prospect to the list
+      await addProspectToList(existingCall.tenantId, toCallbackList.id, prospectId);
+
+      // Update prospect stage to TO_CALLBACK
+      await prisma.prospect.update({
+        where: { id: prospectId },
+        data: {
+          stage: "TO_CALLBACK",
+          stageChangedAt: new Date(),
+        },
       });
 
-      // Add AI summary as note
-      if (summary) {
-        await addNote(
-          existingCall.tenantId,
+      // Create a callback task in the agenda
+      const callbackDate = new Date();
+      callbackDate.setHours(callbackDate.getHours() + 1); // Callback within 1 hour
+
+      const prospectName = [firstName, lastName].filter(Boolean).join(" ") || phone || "Nouveau prospect";
+
+      await prisma.appointment.create({
+        data: {
+          tenantId: existingCall.tenantId,
           prospectId,
-          null,
-          `Resume IA de l'appel:\n${summary}`,
-          "AI_SUMMARY"
-        );
-      }
+          title: `Rappeler: ${prospectName}`,
+          description: summary ? `Resume de l'appel IA:\n${summary}` : "Appel entrant via agent IA - A rappeler",
+          startTime: callbackDate,
+          endTime: new Date(callbackDate.getTime() + 15 * 60000), // 15 min slot
+          duration: 15,
+          status: "SCHEDULED",
+          bookedBy: "AI",
+          consultationType: "CALLBACK",
+        },
+      });
 
-      // ── AUTO-WORKFLOW: Add to "À rappeler" list ──────────────────────────────
-      try {
-        // Get or create the "À rappeler" system list
-        const toCallbackList = await getOrCreateSystemList(
-          existingCall.tenantId,
-          SYSTEM_LISTS.TO_CALLBACK
-        );
-
-        // Add prospect to the list
-        await addProspectToList(existingCall.tenantId, toCallbackList.id, prospectId);
-
-        // Update prospect stage to TO_CALLBACK
-        await prisma.prospect.update({
-          where: { id: prospectId },
-          data: {
-            stage: "TO_CALLBACK",
-            stageChangedAt: new Date(),
-          },
-        });
-
-        // Create a callback task in the agenda
-        const callbackDate = new Date();
-        callbackDate.setHours(callbackDate.getHours() + 1); // Callback within 1 hour
-
-        const prospectName = [firstName, lastName].filter(Boolean).join(" ") || phone || "Nouveau prospect";
-
-        await prisma.appointment.create({
-          data: {
-            tenantId: existingCall.tenantId,
-            prospectId,
-            title: `Rappeler: ${prospectName}`,
-            description: summary ? `Resume de l'appel IA:\n${summary}` : "Appel entrant via agent IA - A rappeler",
-            startTime: callbackDate,
-            endTime: new Date(callbackDate.getTime() + 15 * 60000), // 15 min slot
-            duration: 15,
-            status: "SCHEDULED",
-            bookedBy: "AI",
-            consultationType: "CALLBACK",
-          },
-        });
-
-        console.log("[ElevenLabs Webhook] Added prospect to callback list and created task");
-      } catch (workflowError) {
-        console.error("[ElevenLabs Webhook] Workflow error:", workflowError);
-        // Don't fail the webhook if workflow fails
-      }
+      console.log("[ElevenLabs Webhook] Added prospect to callback list and created task");
+    } catch (workflowError) {
+      console.error("[ElevenLabs Webhook] Workflow error:", workflowError);
+      // Don't fail the webhook if workflow fails
     }
   }
 
